@@ -103,10 +103,21 @@ class LXLinearExpression(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        coeff_func = coeff if callable(coeff) else lambda _: coeff
+        coeff_func = coeff if callable(coeff) else lambda _c=coeff: _c
         if where is None:
             where = lambda _: True
-        self.terms[var.name] = (var, coeff_func, where)
+        if var.name in self.terms:
+            existing_var, existing_coeff, existing_where = self.terms[var.name]
+
+            def combined_coeff(m, _old=existing_coeff, _new=coeff_func):
+                return _old(m) + _new(m)
+
+            def combined_where(m, _w1=existing_where, _w2=where):
+                return _w1(m) and _w2(m)
+
+            self.terms[var.name] = (existing_var, combined_coeff, combined_where)
+        else:
+            self.terms[var.name] = (var, coeff_func, where)
         return self
 
     def add_multi_term(
