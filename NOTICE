@@ -1,0 +1,13 @@
+LumiX — kint-pro fork
+=====================
+
+This software is a derivative work based on LumiX, originally created by:
+
+  Tolga Berber <tolga.berber@fen.ktu.edu.tr>
+  Beyzanur Siyah <beyzanursiyah@ktu.edu.tr>
+
+Original repository: https://github.com/tdelphi1981/LumiX
+License: Academic Free License v3.0 (AFL-3.0)
+
+Modifications by kint-pro (https://github.com/kint-pro) for use in the
+Kint optimization platform. See git history for specific changes.

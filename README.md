@@ -2,7 +2,9 @@
   <img src="docs/source/_static/Lumix_Logo_1024.png" alt="LumiX Logo" width="200"/>
 </p>
 
-# LumiX
+# LumiX (kint-pro fork)
+
+> **This is a modified fork of [LumiX](https://github.com/tdelphi1981/LumiX) by Tolga Berber and Beyzanur Siyah, licensed under the [Academic Free License v3.0](https://opensource.org/licenses/AFL-3.0). Modifications by kint-pro for use in the [Kint](https://kint.pro) optimization platform.**
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-AFL--3.0-green.svg)](https://opensource.org/licenses/AFL-3.0)
