@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Regression tests for CP-SAT solver constraint naming (`tests/test_cpsat_solver.py`)
 - CONTRIBUTING.md with comprehensive development guidelines
 - CODE_OF_CONDUCT.md with academic-focused community standards
 - SECURITY.md with vulnerability reporting policy
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- CP-SAT solver crash: `ct.Proto().name` corrupts protobuf in newer OR-Tools, causing `Check failed: LoadConstraint` segfault. Replaced with `ct.WithName()`.
 
 ### Security
 

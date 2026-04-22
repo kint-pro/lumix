@@ -437,7 +437,7 @@ class LXCPSATSolver(LXSolverInterface):
             raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
         # Set constraint name (for debugging)
-        ct.Proto().name = lx_constraint.name
+        ct.WithName(lx_constraint.name)
 
         self._constraint_list.append(ct)
 
@@ -499,7 +499,7 @@ class LXCPSATSolver(LXSolverInterface):
                 raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
             # Set constraint name
-            ct.Proto().name = ct_name
+            ct.WithName(ct_name)
 
             self._constraint_list.append(ct)
 
