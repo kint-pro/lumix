@@ -377,9 +377,11 @@ class LXCPSATSolver(LXSolverInterface):
             raise ValueError(
                 f"Interval '{lx_iv.name}' is missing start or end variable."
             )
-        if lx_iv.duration is None and lx_iv.duration_var_ref is None:
+        if (lx_iv.duration is None and lx_iv.duration_var_ref is None
+                and lx_iv.duration_func is None):
             raise ValueError(
-                f"Interval '{lx_iv.name}' has neither fixed duration nor duration variable."
+                f"Interval '{lx_iv.name}' has no duration source; set one of "
+                "duration_fixed / duration_per_instance / duration_var."
             )
 
         start_solver = self._variable_map.get(lx_iv.start_var.name)
@@ -407,6 +409,7 @@ class LXCPSATSolver(LXSolverInterface):
             key = None
             start_v = start_solver if not isinstance(start_solver, dict) else next(iter(start_solver.values()))
             end_v = end_solver if not isinstance(end_solver, dict) else next(iter(end_solver.values()))
+            # duration_per_instance is meaningless without instances; ignore it here.
             size = (
                 lx_iv.duration
                 if lx_iv.duration is not None
@@ -421,6 +424,8 @@ class LXCPSATSolver(LXSolverInterface):
                 end_v = end_solver[key] if isinstance(end_solver, dict) else end_solver
                 if lx_iv.duration is not None:
                     size: Any = lx_iv.duration
+                elif lx_iv.duration_func is not None:
+                    size = int(lx_iv.duration_func(instance))
                 else:
                     size = dur_solver[key] if isinstance(dur_solver, dict) else dur_solver
                 iv = cpsat_model.NewIntervalVar(start_v, size, end_v, f"{lx_iv.name}[{key}]")

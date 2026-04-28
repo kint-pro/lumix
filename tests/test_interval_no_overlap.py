@@ -426,6 +426,51 @@ def test_5op_jsp_optimum_makespan():
     assert sol.objective_value == pytest.approx(sum(o.duration for o in ops), abs=1e-6)
 
 
+# ==================== Per-instance fixed durations ====================
+
+
+def test_duration_per_instance_per_op_fixed_durations():
+    """Per-instance fixed duration via lambda — each Op carries its own duration."""
+    ops = [Op("o1", "M1", 4), Op("o2", "M1", 7), Op("o3", "M1", 2)]
+    horizon = 30
+    model = LXModel("per_instance_dur")
+    starts = (
+        LXVariable[Op, int]("start").integer().bounds(0, horizon)
+        .indexed_by(lambda o: o.id).from_data(ops)
+    )
+    ends = (
+        LXVariable[Op, int]("end").integer().bounds(0, horizon)
+        .indexed_by(lambda o: o.id).from_data(ops)
+    )
+    model.add_variable(starts).add_variable(ends)
+    interval = (
+        LXIntervalVariable[Op]("op_iv")
+        .start(starts).end(ends)
+        .duration_per_instance(lambda o: o.duration)
+        .indexed_by(lambda o: o.id).from_data(ops)
+    )
+    model.add_interval_variable(interval)
+    model.add_constraint(LXNoOverlapConstraint("m1_no_ovr", [interval]))
+    sol = LXOptimizer().use_solver("cpsat").solve(model)
+    assert sol.status == "optimal"
+    iv_values = sol.intervals["op_iv"]
+    for o in ops:
+        rec = iv_values[o.id]
+        assert rec["duration"] == o.duration
+
+
+def test_duration_modes_mutually_exclusive():
+    """All three duration modes are mutually exclusive."""
+    iv = LXIntervalVariable[Op]("test")
+    iv.duration_fixed(5)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        iv.duration_per_instance(lambda o: o.duration)
+    iv2 = LXIntervalVariable[Op]("test2")
+    iv2.duration_per_instance(lambda o: o.duration)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        iv2.duration_fixed(5)
+
+
 # ==================== Cross-solver: NotImplementedError ====================
 
 

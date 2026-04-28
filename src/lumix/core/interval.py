@@ -43,8 +43,12 @@ class LXIntervalVariable(Generic[TModel]):
         self.name = name
         self.start_var: Optional[LXVariable] = None
         self.end_var: Optional[LXVariable] = None
-        # Fixed scalar duration applied to every instance; mutually exclusive with duration_var_ref.
+        # Three mutually-exclusive duration modes:
+        # - duration: same int for every instance ("fixed")
+        # - duration_func: lambda(data) -> int for per-instance fixed duration
+        # - duration_var_ref: LXVariable with per-instance integer/continuous duration
         self.duration: Optional[int] = None
+        self.duration_func: Optional[Callable[[TModel], int]] = None
         self.duration_var_ref: Optional[LXVariable] = None
         self.index_func: Optional[Callable[[TModel], TIndex]] = None
         self._data: Optional[List[TModel]] = None
@@ -65,11 +69,17 @@ class LXIntervalVariable(Generic[TModel]):
         )
 
         # Lambdas with closures: detach safely the same way LXVariable does.
+        from ..utils.copy_utils import copy_function_detaching_closure
         if self.index_func is not None:
-            from ..utils.copy_utils import copy_function_detaching_closure
             result.index_func = copy_function_detaching_closure(self.index_func, memo)
         else:
             result.index_func = None
+        if self.duration_func is not None:
+            result.duration_func = copy_function_detaching_closure(
+                self.duration_func, memo
+            )
+        else:
+            result.duration_func = None
 
         if self._data is not None:
             from ..utils.copy_utils import materialize_and_detach_list
@@ -89,31 +99,51 @@ class LXIntervalVariable(Generic[TModel]):
         self.end_var = var
         return self
 
+    def _check_duration_unset(self, kind_new: str) -> None:
+        already = []
+        if self.duration is not None:
+            already.append("duration_fixed")
+        if self.duration_func is not None:
+            already.append("duration_per_instance")
+        if self.duration_var_ref is not None:
+            already.append("duration_var")
+        if already:
+            raise ValueError(
+                f"Interval '{self.name}' already has {', '.join(already)}; "
+                f"{kind_new} is mutually exclusive."
+            )
+
     def duration_fixed(self, value: int) -> Self:
         """
         Set a fixed integer duration applied to every interval instance.
 
-        Mutually exclusive with `duration_var(...)`.
+        Mutually exclusive with `duration_per_instance(...)` and `duration_var(...)`.
         """
-        if self.duration_var_ref is not None:
-            raise ValueError(
-                f"Interval '{self.name}' already has duration_var; "
-                "duration_fixed and duration_var are mutually exclusive."
-            )
+        self._check_duration_unset("duration_fixed")
         self.duration = int(value)
+        return self
+
+    def duration_per_instance(self, func: Callable[[TModel], int]) -> Self:
+        """
+        Provide a lambda that returns a fixed integer duration per data instance.
+
+        Use this when each instance has its own fixed duration (e.g., JSP ops
+        with per-op processing time). The function is called once per
+        ``from_data`` instance during solver build.
+
+        Mutually exclusive with `duration_fixed(...)` and `duration_var(...)`.
+        """
+        self._check_duration_unset("duration_per_instance")
+        self.duration_func = func
         return self
 
     def duration_var(self, var: LXVariable) -> Self:
         """
         Bind a duration variable family (per-instance variable duration).
 
-        Mutually exclusive with `duration_fixed(...)`.
+        Mutually exclusive with `duration_fixed(...)` and `duration_per_instance(...)`.
         """
-        if self.duration is not None:
-            raise ValueError(
-                f"Interval '{self.name}' already has duration_fixed; "
-                "duration_fixed and duration_var are mutually exclusive."
-            )
+        self._check_duration_unset("duration_var")
         self.duration_var_ref = var
         return self
 
