@@ -73,7 +73,14 @@ class LXORToolsSolver(LXSolverInterface):
 
         Raises:
             ValueError: If model contains unsupported features
+            NotImplementedError: If the model uses scheduling primitives.
         """
+        if getattr(model, "scheduling_constraints", None):
+            raise NotImplementedError(
+                "OR-Tools MILP solver does not support LXNoOverlapConstraint. "
+                "Use the CP-SAT solver for scheduling primitives."
+            )
+
         # Determine if we need integer solver or continuous
         has_integer = any(
             var.var_type in [LXVarType.INTEGER, LXVarType.BINARY]

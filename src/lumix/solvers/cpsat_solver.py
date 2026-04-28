@@ -10,9 +10,10 @@ try:
 except ImportError:
     cp_model = None  # type: ignore
 
-from ..core.constraints import LXConstraint
+from ..core.constraints import LXConstraint, LXNoOverlapConstraint
 from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from ..core.expressions import LXLinearExpression
+from ..core.interval import LXIntervalVariable
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
@@ -85,6 +86,8 @@ class LXCPSATSolver(LXSolverInterface):
         self._model: Optional[cp_model.CpModel] = None
         self._variable_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
         self._constraint_list: List[Any] = []
+        # IntervalVar handles per LXIntervalVariable name, keyed by index_func key.
+        self._interval_map: Dict[str, Dict[Any, Any]] = {}
         self._rational_converter = LXRationalConverter(max_denominator=rational_max_denom)
         self._scale_objective = scale_objective
         self._objective_scale: int = 1
@@ -140,6 +143,7 @@ class LXCPSATSolver(LXSolverInterface):
         # Reset internal state
         self._variable_map = {}
         self._constraint_list = []
+        self._interval_map = {}
         self._objective_scale = 1
 
         # Build variables
@@ -163,6 +167,20 @@ class LXCPSATSolver(LXSolverInterface):
             else:
                 # Constraint family (indexed by data)
                 self._create_indexed_constraints(lx_constraint, instances)
+
+        # Register interval variables (CP-SAT IntervalVar) — must precede scheduling constraints.
+        for lx_iv in getattr(model, "intervals", []):
+            self._register_interval_variable(lx_iv)
+
+        # Apply scheduling constraints (NoOverlap, future Cumulative).
+        for sc in getattr(model, "scheduling_constraints", []):
+            if isinstance(sc, LXNoOverlapConstraint):
+                self._apply_no_overlap(sc)
+            else:
+                raise NotImplementedError(
+                    f"CP-SAT solver: unsupported scheduling constraint type "
+                    f"{type(sc).__name__}"
+                )
 
         # Set objective
         self._set_objective(model)
@@ -339,6 +357,93 @@ class LXCPSATSolver(LXSolverInterface):
             self.logger.logger.info(
                 f"Solution hint: {n_applied} applied, {n_skipped} skipped"
             )
+
+    def _register_interval_variable(self, lx_iv: LXIntervalVariable) -> None:
+        """
+        Build CP-SAT IntervalVar instances backing an LXIntervalVariable.
+
+        Resolves start/end IntVars via ``self._variable_map`` (the underlying
+        LXVariable families must already be registered). For each data instance
+        we look up the corresponding start/end IntVar and create one IntervalVar
+        per instance, stored in ``self._interval_map[name][key]``.
+
+        For scalar (non-indexed) intervals, the variable_map entry is a single
+        IntVar — we create a single IntervalVar under key ``None``.
+        """
+        cpsat_model = self._model
+        assert cpsat_model is not None
+
+        if lx_iv.start_var is None or lx_iv.end_var is None:
+            raise ValueError(
+                f"Interval '{lx_iv.name}' is missing start or end variable."
+            )
+        if lx_iv.duration is None and lx_iv.duration_var_ref is None:
+            raise ValueError(
+                f"Interval '{lx_iv.name}' has neither fixed duration nor duration variable."
+            )
+
+        start_solver = self._variable_map.get(lx_iv.start_var.name)
+        end_solver = self._variable_map.get(lx_iv.end_var.name)
+        if start_solver is None or end_solver is None:
+            raise ValueError(
+                f"Interval '{lx_iv.name}' references variables "
+                f"'{lx_iv.start_var.name}' and '{lx_iv.end_var.name}' which "
+                "were not registered (add them via model.add_variable first)."
+            )
+
+        dur_solver: Any = None
+        if lx_iv.duration_var_ref is not None:
+            dur_solver = self._variable_map.get(lx_iv.duration_var_ref.name)
+            if dur_solver is None:
+                raise ValueError(
+                    f"Interval '{lx_iv.name}' references duration variable "
+                    f"'{lx_iv.duration_var_ref.name}' which was not registered."
+                )
+
+        instances = lx_iv.get_instances()
+        iv_dict: Dict[Any, Any] = {}
+
+        if not instances:
+            key = None
+            start_v = start_solver if not isinstance(start_solver, dict) else next(iter(start_solver.values()))
+            end_v = end_solver if not isinstance(end_solver, dict) else next(iter(end_solver.values()))
+            size = (
+                lx_iv.duration
+                if lx_iv.duration is not None
+                else (dur_solver if not isinstance(dur_solver, dict) else next(iter(dur_solver.values())))
+            )
+            iv = cpsat_model.NewIntervalVar(start_v, size, end_v, f"{lx_iv.name}")
+            iv_dict[key] = iv
+        else:
+            for instance in instances:
+                key = lx_iv.index_func(instance) if lx_iv.index_func is not None else instance
+                start_v = start_solver[key] if isinstance(start_solver, dict) else start_solver
+                end_v = end_solver[key] if isinstance(end_solver, dict) else end_solver
+                if lx_iv.duration is not None:
+                    size: Any = lx_iv.duration
+                else:
+                    size = dur_solver[key] if isinstance(dur_solver, dict) else dur_solver
+                iv = cpsat_model.NewIntervalVar(start_v, size, end_v, f"{lx_iv.name}[{key}]")
+                iv_dict[key] = iv
+
+        self._interval_map[lx_iv.name] = iv_dict
+
+    def _apply_no_overlap(self, sc: LXNoOverlapConstraint) -> None:
+        """Translate LXNoOverlapConstraint to cp_model.AddNoOverlap on its intervals."""
+        cpsat_model = self._model
+        assert cpsat_model is not None
+
+        ivars: List[Any] = []
+        for lx_iv in sc.intervals:
+            iv_dict = self._interval_map.get(lx_iv.name)
+            if iv_dict is None:
+                raise ValueError(
+                    f"NoOverlap '{sc.name}' references interval '{lx_iv.name}' "
+                    "that was not registered via model.add_interval_variable(...)."
+                )
+            ivars.extend(iv_dict.values())
+        if ivars:
+            cpsat_model.AddNoOverlap(ivars)
 
     def _log_scaling_warning(self, continuous_vars: List[str]) -> None:
         """Log warning about rational conversion auto-scaling."""
@@ -999,6 +1104,21 @@ class LXCPSATSolver(LXSolverInterface):
         except Exception:
             pass
 
+        # Resolve interval variable readback {start, end, duration} per index key.
+        intervals_out: Dict[str, Dict[Any, Dict[str, float]]] = {}
+        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
+            for lx_iv in getattr(model, "intervals", []):
+                iv_dict = self._interval_map.get(lx_iv.name)
+                if iv_dict is None:
+                    continue
+                per_key: Dict[Any, Dict[str, float]] = {}
+                for key, ivar in iv_dict.items():
+                    s = float(solver.Value(ivar.StartExpr()))
+                    e = float(solver.Value(ivar.EndExpr()))
+                    d = float(solver.Value(ivar.SizeExpr()))
+                    per_key[key] = {"start": s, "end": e, "duration": d}
+                intervals_out[lx_iv.name] = per_key
+
         # Create and return solution
         return LXSolution(
             objective_value=obj_value,
@@ -1014,6 +1134,7 @@ class LXCPSATSolver(LXSolverInterface):
             best_objective_bound=best_objective_bound,
             conflicts=conflicts,
             deterministic_time=deterministic_time,
+            intervals=intervals_out,
         )
 
 

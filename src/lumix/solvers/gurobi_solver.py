@@ -75,7 +75,14 @@ class LXGurobiSolver(LXSolverInterface):
 
         Raises:
             ValueError: If model contains unsupported features
+            NotImplementedError: If the model uses scheduling primitives.
         """
+        if getattr(model, "scheduling_constraints", None):
+            raise NotImplementedError(
+                "Gurobi solver does not support LXNoOverlapConstraint. "
+                "Use the CP-SAT solver for scheduling primitives."
+            )
+
         # Create Gurobi model instance
         self._model = gp.Model(model.name)
 

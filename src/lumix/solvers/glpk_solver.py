@@ -71,7 +71,14 @@ class LXGLPKSolver(LXSolverInterface):
 
         Raises:
             ValueError: If model contains unsupported features
+            NotImplementedError: If the model uses scheduling primitives.
         """
+        if getattr(model, "scheduling_constraints", None):
+            raise NotImplementedError(
+                "GLPK solver does not support LXNoOverlapConstraint. "
+                "Use the CP-SAT solver for scheduling primitives."
+            )
+
         # Create GLPK problem instance
         self._model = glpk.glp_create_prob()
         glpk.glp_set_prob_name(self._model, model.name)

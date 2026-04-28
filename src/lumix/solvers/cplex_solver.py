@@ -82,7 +82,14 @@ class LXCPLEXSolver(LXSolverInterface):
 
         Raises:
             ValueError: If model contains unsupported features
+            NotImplementedError: If the model uses scheduling primitives.
         """
+        if getattr(model, "scheduling_constraints", None):
+            raise NotImplementedError(
+                "CPLEX solver does not support LXNoOverlapConstraint. "
+                "Use the CP-SAT solver for scheduling primitives."
+            )
+
         # Create CPLEX model instance
         self._model = Cplex()
         self._model.set_problem_name(model.name)

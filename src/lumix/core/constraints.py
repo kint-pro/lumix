@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 from .enums import LXConstraintSense
 from .expressions import LXLinearExpression
+from .interval import LXIntervalVariable
 
 if TYPE_CHECKING:
     from ..goal_programming.goal import LXGoalMetadata
@@ -374,4 +375,33 @@ class LXConstraint(Generic[TModel]):
         )
 
 
-__all__ = ["LXConstraint"]
+class LXNoOverlapConstraint:
+    """
+    No-overlap scheduling constraint over a set of LXIntervalVariable families.
+
+    Distinct from LXConstraint: there is no LHS/RHS/sense — the semantics are
+    that no two intervals in the listed families may overlap in time. Stored
+    by LXModel in `scheduling_constraints` so legacy solver loops over
+    `model.constraints` never encounter a non-linear-shape entry.
+    """
+
+    def __init__(self, name: str, intervals: List[LXIntervalVariable]) -> None:
+        self.name = name
+        self.intervals = list(intervals)
+
+    def __deepcopy__(self, memo: dict) -> "LXNoOverlapConstraint":
+        from copy import deepcopy
+
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        result.name = self.name
+        result.intervals = [deepcopy(iv, memo) for iv in self.intervals]
+        return result
+
+    def is_goal(self) -> bool:
+        """Goal-programming iteration calls is_goal() on every constraint; always False here."""
+        return False
+
+
+__all__ = ["LXConstraint", "LXNoOverlapConstraint"]

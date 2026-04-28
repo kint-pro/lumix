@@ -95,9 +95,10 @@ from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, TypeVar, U
 
 from typing_extensions import Self
 
-from .constraints import LXConstraint
+from .constraints import LXConstraint, LXNoOverlapConstraint
 from .enums import LXObjectiveSense
 from .expressions import LXLinearExpression, LXQuadraticExpression
+from .interval import LXIntervalVariable
 from .variables import LXVariable
 
 if TYPE_CHECKING:
@@ -151,6 +152,11 @@ class LXModel(Generic[TModel]):
         # multiple families (e.g., production, inventory, transportation).
         self.variables: List[LXVariable] = []
         self.constraints: List[LXConstraint] = []
+        # Scheduling primitives kept in dedicated lists so existing solver loops
+        # over `variables` / `constraints` (which assume LXVariable / LXConstraint
+        # shape) never encounter the new types and silently mis-handle them.
+        self.intervals: List[LXIntervalVariable] = []
+        self.scheduling_constraints: List[LXNoOverlapConstraint] = []
         self.objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
         self.objective_sense: LXObjectiveSense = LXObjectiveSense.MAXIMIZE
 
@@ -211,6 +217,12 @@ class LXModel(Generic[TModel]):
         # Deep copy all constraint families
         # Each constraint's __deepcopy__ will materialize and detach ORM data
         result.constraints = [deepcopy(constr, memo) for constr in self.constraints]
+
+        # Deep copy scheduling primitives.
+        result.intervals = [deepcopy(iv, memo) for iv in self.intervals]
+        result.scheduling_constraints = [
+            deepcopy(sc, memo) for sc in self.scheduling_constraints
+        ]
 
         # Deep copy objective expression (if present)
         result.objective_expr = (
@@ -278,17 +290,40 @@ class LXModel(Generic[TModel]):
         self.variables.extend(variables)
         return self
 
-    def add_constraint(self, constraint: LXConstraint) -> Self:
+    def add_constraint(
+        self, constraint: "LXConstraint | LXNoOverlapConstraint"
+    ) -> Self:
         """
         Add constraint with full type checking.
 
+        LXConstraint (linear LHS/sense/RHS) is appended to ``self.constraints``;
+        LXNoOverlapConstraint (scheduling primitive, no LHS/RHS) is appended to
+        ``self.scheduling_constraints`` so solvers without scheduling support
+        can iterate `self.constraints` safely.
+
         Args:
-            constraint: Constraint to add
+            constraint: LXConstraint or LXNoOverlapConstraint instance.
 
         Returns:
             Self for chaining
         """
-        self.constraints.append(constraint)
+        if isinstance(constraint, LXNoOverlapConstraint):
+            self.scheduling_constraints.append(constraint)
+        else:
+            self.constraints.append(constraint)
+        return self
+
+    def add_interval_variable(self, interval: LXIntervalVariable) -> Self:
+        """
+        Add an interval variable family used by scheduling constraints.
+
+        Args:
+            interval: LXIntervalVariable instance.
+
+        Returns:
+            Self for chaining.
+        """
+        self.intervals.append(interval)
         return self
 
     def add_constraints(self, *constraints: LXConstraint) -> Self:
