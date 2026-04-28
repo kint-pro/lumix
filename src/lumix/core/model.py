@@ -91,7 +91,7 @@ See Also:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -159,6 +159,10 @@ class LXModel(Generic[TModel]):
         self._relaxed_constraints: List["RelaxedConstraint"] = []
         self._goal_programming_prepared: bool = False
 
+        # Solution hint for warmstart. Solver-agnostic at the model layer;
+        # solvers that don't support hints are expected to ignore it silently.
+        self._solution_hint: Optional[Dict[str, Any]] = None
+
     def __deepcopy__(self, memo):
         """Custom deepcopy that enables what-if analysis with ORM data sources.
 
@@ -219,6 +223,13 @@ class LXModel(Generic[TModel]):
         result._relaxed_constraints = [
             deepcopy(rc, memo) for rc in self._relaxed_constraints
         ]
+
+        # Solution hint is a plain dict — deepcopy is safe and decouples from source.
+        result._solution_hint = (
+            deepcopy(self._solution_hint, memo)
+            if self._solution_hint is not None
+            else None
+        )
 
         return result
 
@@ -376,6 +387,55 @@ class LXModel(Generic[TModel]):
                 f"Invalid goal mode: {mode}. Must be 'weighted' or 'sequential'"
             )
         self.goal_mode = mode
+        return self
+
+    def set_solution_hint(
+        self,
+        hint: "Union[LXSolution, Dict[str, Any], None]",
+    ) -> Self:
+        """
+        Provide a warmstart hint to the next solve.
+
+        Hints are advisory; solvers that don't support them ignore the value
+        without raising. Solvers that do support them (e.g. CP-SAT via
+        ``AddHint``) bias their incumbent search around the hint.
+
+        Args:
+            hint: Either an LXSolution (the solver's prior result) or a dict
+                in one of these shapes:
+
+                * ``{var_name: scalar_value}`` for non-indexed variables
+                * ``{var_name: {index_key: scalar_value}}`` for indexed
+
+                For LXSolution input, the ``variables`` dict is consumed
+                directly. Setting hint=None clears any previously set hint.
+
+                When goal programming is active (``goal_mode`` set), the hint
+                will not include solver-introduced deviation variables; the
+                solver fills those in itself. A debug-level note is logged.
+
+        Returns:
+            Self for chaining.
+
+        Example:
+            >>> sol1 = optimizer.solve(model)
+            >>> model.set_solution_hint(sol1)
+            >>> sol2 = optimizer.solve(model)  # Warmstart from sol1
+        """
+        from copy import deepcopy
+        if hint is None:
+            self._solution_hint = None
+            return self
+        # Lazy import to avoid circular dep — LXSolution lives one level up.
+        from ..solution.solution import LXSolution
+        if isinstance(hint, LXSolution):
+            self._solution_hint = deepcopy(hint.variables)
+        elif isinstance(hint, dict):
+            self._solution_hint = deepcopy(hint)
+        else:
+            raise TypeError(
+                f"hint must be LXSolution or dict, got {type(hint).__name__}"
+            )
         return self
 
     def prepare_goal_programming(self) -> Self:

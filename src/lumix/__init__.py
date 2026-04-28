@@ -111,6 +111,7 @@ from .solvers import (
     CPLEX_CAPABILITIES,
     GUROBI_CAPABILITIES,
     ORTOOLS_CAPABILITIES,
+    SOLVER_REGISTRY,
     LXOptimizer,
     LXSolverCapability,
     LXSolverFeature,

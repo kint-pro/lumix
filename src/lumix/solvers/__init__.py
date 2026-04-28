@@ -7,6 +7,7 @@ from .capabilities import (
     GLPK_CAPABILITIES,
     GUROBI_CAPABILITIES,
     ORTOOLS_CAPABILITIES,
+    SOLVER_REGISTRY,
     LXSolverCapability,
     LXSolverFeature,
 )
@@ -21,4 +22,5 @@ __all__ = [
     "CPLEX_CAPABILITIES",
     "CPSAT_CAPABILITIES",
     "GLPK_CAPABILITIES",
+    "SOLVER_REGISTRY",
 ]

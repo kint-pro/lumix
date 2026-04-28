@@ -69,6 +69,14 @@ class LXSolution(Generic[TModel]):
     iterations: Optional[int] = None
     nodes: Optional[int] = None
 
+    # Dual bound: best LB for minimization, best UB for maximization.
+    best_objective_bound: Optional[float] = None
+    conflicts: Optional[int] = None
+    deterministic_time: Optional[float] = None  # CP-SAT-only
+
+    # Per-interval resolved {start, end, duration[, presence]} keyed like `variables`.
+    intervals: Dict[str, Dict[Any, Dict[str, float]]] = field(default_factory=dict)
+
     # Goal programming information
     goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]] = field(
         default_factory=dict

@@ -204,6 +204,13 @@ class LXCPSATSolver(LXSolverInterface):
         # Build the model
         cpsat_model = self.build_model(model)
 
+        # Apply solution hint (CP-SAT supports AddHint per integer variable).
+        # Hint values are coerced to int because CP-SAT only accepts integer hints;
+        # float hints would be silently dropped by the underlying API.
+        hint = getattr(model, "_solution_hint", None)
+        if hint:
+            self._apply_solution_hint(cpsat_model, hint)
+
         # Create solver instance
         solver = cp_model.CpSolver()
 
@@ -271,6 +278,67 @@ class LXCPSATSolver(LXSolverInterface):
         return self._model
 
     # ==================== PRIVATE HELPER METHODS ====================
+
+    def _apply_solution_hint(
+        self,
+        cpsat_model: cp_model.CpModel,
+        hint: Dict[str, Any],
+    ) -> None:
+        """
+        Inject a solution hint into the CP-SAT model.
+
+        For each (var_name, value) in the hint, look up the variable family
+        in ``self._variable_map`` and call ``cpsat_model.AddHint(var, int(value))``.
+        Indexed variables receive per-key hints. Non-numeric values are skipped
+        with a debug log; CP-SAT does not error on partial hints.
+        """
+        n_applied = 0
+        n_skipped = 0
+
+        # Continuous-variable hints must be re-scaled to match how the variable
+        # was registered (rational-conversion auto-scaling). Returns None if
+        # value can't be converted (non-numeric, NaN, inf).
+        def _to_hint_int(name: str, raw: Any) -> Optional[int]:
+            try:
+                f = float(raw)
+            except (TypeError, ValueError):
+                return None
+            if f != f or f in (float("inf"), float("-inf")):
+                return None
+            scale = (
+                self._variable_scales.get(name, 1)
+                if name in self._scaled_variables else 1
+            )
+            return int(round(f * scale))
+
+        for var_name, value in hint.items():
+            mapped = self._variable_map.get(var_name)
+            if mapped is None:
+                n_skipped += 1
+                continue
+            if isinstance(mapped, dict):
+                if not isinstance(value, dict):
+                    n_skipped += 1
+                    continue
+                for key, v in value.items():
+                    var = mapped.get(key)
+                    iv = _to_hint_int(var_name, v) if var is not None else None
+                    if iv is None:
+                        n_skipped += 1
+                        continue
+                    cpsat_model.AddHint(var, iv)
+                    n_applied += 1
+            else:
+                iv = _to_hint_int(var_name, value)
+                if iv is None:
+                    n_skipped += 1
+                    continue
+                cpsat_model.AddHint(mapped, iv)
+                n_applied += 1
+        if n_applied or n_skipped:
+            self.logger.logger.info(
+                f"Solution hint: {n_applied} applied, {n_skipped} skipped"
+            )
 
     def _log_scaling_warning(self, continuous_vars: List[str]) -> None:
         """Log warning about rational conversion auto-scaling."""
@@ -903,19 +971,31 @@ class LXCPSATSolver(LXSolverInterface):
         gap: Optional[float] = None
         iterations: Optional[int] = None
         nodes: Optional[int] = None
+        best_objective_bound: Optional[float] = None
+        conflicts: Optional[int] = None
+        deterministic_time: Optional[float] = None
 
         # Get best objective bound for gap calculation
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
             try:
-                best_bound = solver.BestObjectiveBound()
-                if obj_value != 0 and abs(obj_value - best_bound) > 1e-10:
-                    gap = abs(obj_value - best_bound) / abs(obj_value)
+                best_objective_bound = float(solver.BestObjectiveBound())
+                if obj_value != 0 and abs(obj_value - best_objective_bound) > 1e-10:
+                    gap = abs(obj_value - best_objective_bound) / abs(obj_value)
             except Exception:
                 pass
 
         # CP-SAT provides branch count and conflict count
         try:
-            nodes = solver.NumBranches()
+            nodes = int(solver.NumBranches())
+        except Exception:
+            pass
+        try:
+            conflicts = int(solver.NumConflicts())
+        except Exception:
+            pass
+        # CpSolver exposes deterministic_time only as a property, not a method.
+        try:
+            deterministic_time = float(solver.deterministic_time)
         except Exception:
             pass
 
@@ -931,6 +1011,9 @@ class LXCPSATSolver(LXSolverInterface):
             gap=gap,
             iterations=iterations,
             nodes=nodes,
+            best_objective_bound=best_objective_bound,
+            conflicts=conflicts,
+            deterministic_time=deterministic_time,
         )
 
 

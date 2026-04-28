@@ -70,6 +70,14 @@ class LXSolverFeature(Flag):
     CONFLICT_REFINEMENT = auto()
     SENSITIVITY_ANALYSIS = auto()
 
+    # Scheduling primitives (CP-SAT native)
+    INTERVAL_VARIABLES = auto()
+    NO_OVERLAP = auto()
+    CUMULATIVE = auto()
+
+    # Warmstart / search guidance
+    SOLUTION_HINT = auto()
+
 
 @dataclass
 class LXSolverCapability:
@@ -248,14 +256,15 @@ CPSAT_CAPABILITIES = LXSolverCapability(
     features=(
         LXSolverFeature.INTEGER
         | LXSolverFeature.BINARY
+        | LXSolverFeature.INTERVAL_VARIABLES
+        | LXSolverFeature.NO_OVERLAP
+        | LXSolverFeature.SOLUTION_HINT
         # Note: CP-SAT does NOT support continuous variables (no LINEAR flag)
         # CP-SAT is designed for integer and boolean variables only
-        # TODO: Add CP-specific features when library supports them:
+        # TODO: Add more CP-specific features when library supports them:
         #   - AllDifferent constraints
         #   - Circuit constraints (for routing/TSP)
         #   - Table constraints
-        #   - Interval variables (for scheduling)
-        #   - NoOverlap constraints
         #   - Cumulative constraints
     ),
     supports_warmstart=True,  # Via solution hints
@@ -277,6 +286,14 @@ GLPK_CAPABILITIES = LXSolverCapability(
 )
 
 
+SOLVER_REGISTRY: dict[str, LXSolverCapability] = {
+    "ortools": ORTOOLS_CAPABILITIES,
+    "gurobi": GUROBI_CAPABILITIES,
+    "cplex": CPLEX_CAPABILITIES,
+    "cpsat": CPSAT_CAPABILITIES,
+    "glpk": GLPK_CAPABILITIES,
+}
+
 __all__ = [
     "LXSolverFeature",
     "LXSolverCapability",
@@ -285,4 +302,5 @@ __all__ = [
     "CPLEX_CAPABILITIES",
     "CPSAT_CAPABILITIES",
     "GLPK_CAPABILITIES",
+    "SOLVER_REGISTRY",
 ]
