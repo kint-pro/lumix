@@ -781,7 +781,10 @@ class LXGLPKSolver(LXSolverInterface):
             # We could calculate it manually if needed
             pass
 
-        # Create and return solution
+        best_objective_bound = self._extract_best_objective_bound(
+            glpk_model, status, is_mip, obj_value
+        )
+
         return LXSolution(
             objective_value=obj_value,
             status=lx_status,
@@ -793,7 +796,40 @@ class LXGLPKSolver(LXSolverInterface):
             gap=gap,
             iterations=None,  # GLPK doesn't expose iteration count via swiglpk
             nodes=None,  # GLPK doesn't expose node count via swiglpk
+            best_objective_bound=best_objective_bound,
         )
+
+    def _extract_best_objective_bound(
+        self,
+        glpk_model: Any,
+        status: int,
+        is_mip: bool,
+        obj_value: float,
+    ) -> Optional[float]:
+        """
+        Resolve the dual bound for an LXSolution.
+
+        For MIP runs that hit a time / node limit before producing an
+        incumbent (status GLP_UNDEF), GLPK still retains the LP-relaxation
+        root in `glp_get_obj_val` — exposing it as `best_objective_bound`
+        is essential for downstream gap reporting. For proven-optimal
+        runs the bound equals the objective; for incumbent-only runs the
+        LP root is the tightest dual bound swiglpk exposes.
+        """
+        if not is_mip:
+            if status == glpk.GLP_OPT:
+                return obj_value
+            return None
+
+        if status == glpk.GLP_OPT:
+            return obj_value
+
+        if status in (glpk.GLP_FEAS, glpk.GLP_UNDEF) and glpk.glp_get_status(
+            glpk_model
+        ) == glpk.GLP_OPT:
+            return glpk.glp_get_obj_val(glpk_model)
+
+        return None
 
 
 __all__ = ["LXGLPKSolver"]
