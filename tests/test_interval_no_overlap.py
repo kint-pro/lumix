@@ -379,6 +379,37 @@ def test_intervals_populated_in_solution():
         assert rec["end"] - rec["start"] == rec["duration"]
 
 
+def test_no_overlap_actually_enforced_in_schedule():
+    """Mutation guard: confirm NoOverlap is REALLY applied to CP-SAT, not silently
+    skipped.
+
+    The differential test (interval vs Big-M) and the optimum-equals-sum test
+    can both be passed by an implementation that secretly skips
+    `_apply_no_overlap` — the optima would coincide for trivial reasons
+    (no constraints → solver finds 0; or both broken in the same way).
+
+    This test asserts the SCHEDULE in the solution has no time overlap on
+    any machine — which can ONLY hold if NoOverlap was emitted and
+    propagated. A no-op mutation of `_apply_no_overlap` would let intervals
+    overlap and this test would fail.
+    """
+    ops = [Op("o1", "M1", 4), Op("o2", "M1", 3), Op("o3", "M1", 5)]
+    horizon = 40
+    model = _build_jsp_interval(ops, machines=["M1"], horizon=horizon)
+    sol = LXOptimizer().use_solver("cpsat").solve(model)
+    assert sol.status == "optimal"
+    iv_values = sol.intervals["op_iv"]
+    intervals = sorted(
+        [(iv_values[op.id]["start"], iv_values[op.id]["end"]) for op in ops]
+    )
+    for i in range(len(intervals) - 1):
+        # End of one must be ≤ start of next: no overlap on the shared machine.
+        assert intervals[i][1] <= intervals[i + 1][0], (
+            f"NoOverlap violated: {intervals[i]} overlaps {intervals[i+1]} "
+            f"— _apply_no_overlap likely silently skipped"
+        )
+
+
 def test_5op_jsp_optimum_makespan():
     """5 ops on a single machine, sum of durations = optimum makespan."""
     ops = [
