@@ -118,13 +118,20 @@ class LXOptimizer(Generic[TModel]):
         self.linearizer_config: Optional[LXLinearizerConfig] = None
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
+        self._solver_params: Dict[str, Any] = {}
 
     def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat", "glpk"], **kwargs) -> Self:
         """
         Set solver with literal type checking.
 
+        Solver-specific parameters passed as kwargs are stored and forwarded to
+        the underlying solver at solve() time. Calling use_solver() again
+        replaces previously stored params.
+
         Args:
             name: Solver name ("ortools", "gurobi", "cplex", "cpsat", "glpk")
+            **kwargs: Solver-specific parameters (e.g. time_limit, gap_tolerance).
+                Setting the same key in solve() will raise — pick one place.
 
         Returns:
             Self for chaining
@@ -225,6 +232,10 @@ class LXOptimizer(Generic[TModel]):
         """
         Solve with full type safety.
 
+        Solver parameters from `use_solver(name, **kwargs)` are merged with call-site
+        kwargs. If the same key is set in both, a ValueError is raised — pick one
+        place to set each parameter.
+
         Args:
             model: LXModel to solve
             **solver_params: Solver-specific parameters
@@ -234,7 +245,8 @@ class LXOptimizer(Generic[TModel]):
 
         Raises:
             ImportError: If solver not installed
-            ValueError: If model is invalid
+            ValueError: If model is invalid, or if a solver param is set in both
+                use_solver() and solve()
         """
         # Create solver instance (or reuse existing one if already set)
         if self._solver is None:
@@ -245,9 +257,17 @@ class LXOptimizer(Generic[TModel]):
             model.name, len(model.variables), len(model.constraints)
         )
 
+        overlap = self._solver_params.keys() & solver_params.keys()
+        if overlap:
+            raise ValueError(
+                f"Solver param(s) set in both use_solver() and solve(): {sorted(overlap)}. "
+                f"Set each parameter in exactly one place."
+            )
+        merged_params = {**self._solver_params, **solver_params}
+
         # Solve
         self.logger.log_solve_start(self.solver_name)
-        solution = self._solver.solve(model, enable_sensitivity=self.enable_sens, **solver_params)
+        solution = self._solver.solve(model, enable_sensitivity=self.enable_sens, **merged_params)
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
         # Populate goal deviations if model has prepared goal programming
